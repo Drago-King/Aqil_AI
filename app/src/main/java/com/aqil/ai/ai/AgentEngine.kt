@@ -16,7 +16,7 @@ class AgentEngine(private val openAi: OpenAiClient) {
 
     companion object {
         private const val MAX_STEPS = 24
-        private const val KEEP_OBSERVATIONS = 4
+        private const val KEEP_OBSERVATIONS = 3
         private const val MAX_BAD_REPLIES = 3
         private const val STUCK_LIMIT = 4
 
@@ -125,6 +125,7 @@ class AgentEngine(private val openAi: OpenAiClient) {
                 val reply = try {
                     openAi.chat(profile, trimmed(history), temperature = 0.1)
                 } catch (e: Exception) {
+                    if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
                     onEvent(AgentEvent.Error(e.message ?: "Model request failed")); return
                 }
                 history += Turn("assistant", reply)
@@ -230,12 +231,12 @@ class AgentEngine(private val openAi: OpenAiClient) {
 
     /** How long to wait for the screen to settle after each kind of action. */
     private fun settleFor(action: String): Long = when (action) {
-        "open_app", "launch_app" -> 1500
-        "tap", "click", "back", "recents", "notifications" -> 550
-        "scroll", "swipe" -> 450
-        "type", "press_enter", "enter", "submit" -> 350
-        "read_screen", "ocr", "screen_text" -> 250
-        else -> 300
+        "open_app", "launch_app" -> 1100
+        "tap", "click", "back", "recents", "notifications" -> 380
+        "scroll", "swipe" -> 280
+        "type", "press_enter", "enter", "submit" -> 280
+        "read_screen", "ocr", "screen_text" -> 200
+        else -> 250
     }
 
     private fun trimmed(history: List<Turn>): List<Turn> {

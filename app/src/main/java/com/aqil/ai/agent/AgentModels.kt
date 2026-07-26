@@ -50,14 +50,22 @@ object AgentController {
     @Volatile
     var confirm: CompletableDeferred<Boolean>? = null
 
+    /** Set by the network client so cancel can abort the in-flight request instantly. */
+    @Volatile
+    var onCancel: (() -> Unit)? = null
+
     val isConnected: Boolean get() = device != null
 
     fun requestCancel() {
         cancelRequested = true
         confirm?.complete(false)   // unblock any pending confirmation
+        onCancel?.invoke()         // abort any in-flight model request
     }
 
     fun answerConfirm(ok: Boolean) { confirm?.complete(ok) }
 
-    fun reset() { cancelRequested = false }
+    fun reset() {
+        cancelRequested = false
+        onCancel = null
+    }
 }
