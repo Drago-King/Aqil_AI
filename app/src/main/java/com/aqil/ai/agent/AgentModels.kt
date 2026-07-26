@@ -1,6 +1,7 @@
 package com.aqil.ai.agent
 
 import org.json.JSONObject
+import kotlinx.coroutines.CompletableDeferred
 
 /** A structured action the model asked us to perform. */
 data class AgentAction(
@@ -16,6 +17,8 @@ sealed interface AgentEvent {
     data class Speak(val text: String) : AgentEvent
     data class Finish(val summary: String) : AgentEvent
     data class Error(val message: String) : AgentEvent
+    /** Ask the owner to approve a risky action before it runs. */
+    data class Confirm(val prompt: String) : AgentEvent
 }
 
 /** Implemented by the accessibility service; the engine talks to the phone through this. */
@@ -43,8 +46,18 @@ object AgentController {
     @Volatile
     var cancelRequested: Boolean = false
 
+    /** Pending risky-action confirmation, awaited by the engine and completed by the UI. */
+    @Volatile
+    var confirm: CompletableDeferred<Boolean>? = null
+
     val isConnected: Boolean get() = device != null
 
-    fun requestCancel() { cancelRequested = true }
+    fun requestCancel() {
+        cancelRequested = true
+        confirm?.complete(false)   // unblock any pending confirmation
+    }
+
+    fun answerConfirm(ok: Boolean) { confirm?.complete(ok) }
+
     fun reset() { cancelRequested = false }
 }

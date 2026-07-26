@@ -90,6 +90,8 @@ data class AqilSettings(
     val selectedProfileId: String = profiles.firstOrNull()?.id ?: "",
     val voice: VoiceConfig = VoiceConfig(),
     val agentEnabled: Boolean = true,
+    val customInstructions: String = "",
+    val confirmRisky: Boolean = true,
 ) {
     val activeProfile: ModelProfile?
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.firstOrNull()

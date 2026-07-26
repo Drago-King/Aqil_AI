@@ -22,6 +22,8 @@ class SettingsRepository(private val context: Context) {
         val EL_MODEL = stringPreferencesKey("eleven_model")
         val EL_ENABLED = booleanPreferencesKey("eleven_enabled")
         val AGENT_ENABLED = booleanPreferencesKey("agent_enabled")
+        val CUSTOM_INSTRUCTIONS = stringPreferencesKey("custom_instructions")
+        val CONFIRM_RISKY = booleanPreferencesKey("confirm_risky")
     }
 
     val settings: Flow<AqilSettings> = context.dataStore.data.map { p ->
@@ -37,6 +39,8 @@ class SettingsRepository(private val context: Context) {
                 enabled = p[Keys.EL_ENABLED] ?: true,
             ),
             agentEnabled = p[Keys.AGENT_ENABLED] ?: true,
+            customInstructions = p[Keys.CUSTOM_INSTRUCTIONS] ?: "",
+            confirmRisky = p[Keys.CONFIRM_RISKY] ?: true,
         )
     }
 
@@ -59,5 +63,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAgentEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.AGENT_ENABLED] = enabled }
+    }
+
+    suspend fun saveCustomInstructions(text: String) {
+        context.dataStore.edit { it[Keys.CUSTOM_INSTRUCTIONS] = text }
+    }
+
+    suspend fun setConfirmRisky(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.CONFIRM_RISKY] = enabled }
     }
 }

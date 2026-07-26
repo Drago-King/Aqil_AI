@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,6 +84,7 @@ private val SUGGESTIONS = listOf(
 fun ChatScreen(vm: MainViewModel, actions: SetupActions) {
     val messages by vm.messages.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val pendingConfirm by vm.pendingConfirm.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
 
@@ -110,6 +112,14 @@ fun ChatScreen(vm: MainViewModel, actions: SetupActions) {
         val partial by actions.partial
         AnimatedVisibility(visible = listening, enter = fadeIn(), exit = fadeOut()) {
             ListeningBar(partial = partial)
+        }
+
+        AnimatedVisibility(visible = pendingConfirm != null) {
+            ConfirmBar(
+                prompt = pendingConfirm.orEmpty(),
+                onYes = { vm.confirm(true) },
+                onNo = { vm.confirm(false) },
+            )
         }
 
         InputBar(
@@ -249,6 +259,27 @@ private fun ListeningBar(partial: String) {
             color = if (partial.isBlank()) TextMuted else TextPrimary,
             fontSize = 14.sp
         )
+    }
+}
+
+@Composable
+private fun ConfirmBar(prompt: String, onYes: () -> Unit, onNo: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Navy800)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(Gold))
+            Spacer(Modifier.width(8.dp))
+            Text(prompt, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PrimaryButton("Approve", modifier = Modifier.weight(1f), onClick = onYes)
+            GhostButton("No", modifier = Modifier.weight(1f), onClick = onNo)
+        }
     }
 }
 

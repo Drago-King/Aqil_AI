@@ -51,6 +51,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
+    private val _pendingConfirm = MutableStateFlow<String?>(null)
+    val pendingConfirm: StateFlow<String?> = _pendingConfirm.asStateFlow()
+
     val agentConnected: Boolean get() = AgentController.isConnected
 
     // ---- chat / agent ----
@@ -66,11 +69,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         add(ChatMessage.Role.USER, text)
         _busy.value = true
         AgentController.reset()
+        val s = settings.value
 
         viewModelScope.launch(Dispatchers.IO) {
-            engine.run(profile, text, documentContext.ifBlank { null }) { event -> handleEvent(event) }
+            engine.run(
+                profile = profile,
+                task = text,
+                contextText = documentContext.ifBlank { null },
+                customInstructions = s.customInstructions.ifBlank { null },
+                confirmRisky = s.confirmRisky,
+            ) { event -> handleEvent(event) }
             _busy.value = false
         }
+    }
+
+    /** Answer a pending risky-action confirmation (from the Approve/No buttons). */
+    fun confirm(approved: Boolean) {
+        _pendingConfirm.value = null
+        AgentController.answerConfirm(approved)
     }
 
     /** OCR an image the user picked from their gallery (e.g. a printed certificate). */
@@ -98,6 +114,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Cancel the running task (from the in-app Stop or the floating stop button). */
     fun cancel() {
+        _pendingConfirm.value = null
         AgentController.requestCancel()
         stopVoice()
     }
@@ -118,6 +135,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             is AgentEvent.Error ->
                 add(ChatMessage.Role.SYSTEM, "⚠ ${event.message}")
+            is AgentEvent.Confirm ->
+                _pendingConfirm.value = event.prompt
         }
     }
 
@@ -150,6 +169,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveVoice(v: VoiceConfig) = viewModelScope.launch { repo.saveVoice(v) }
+
+    fun saveCustomInstructions(text: String) = viewModelScope.launch { repo.saveCustomInstructions(text) }
+
+    fun setConfirmRisky(on: Boolean) = viewModelScope.launch { repo.setConfirmRisky(on) }
 
     fun testVoice() {
         val v = settings.value.voice

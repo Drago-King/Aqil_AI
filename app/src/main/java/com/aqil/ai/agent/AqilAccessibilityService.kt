@@ -307,13 +307,17 @@ class AqilAccessibilityService : AccessibilityService(), DeviceController {
         } else "screenshots need Android 11+"
     }
 
-    /** OCR the current display so the model can read text that lives inside images. */
+    /** OCR the current display so the model can read (and tap) text that lives inside images. */
     private suspend fun readScreenText(): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "screen OCR needs Android 11+"
         val bmp = captureBitmap() ?: return "couldn't capture the screen"
         return try {
-            val text = OcrEngine.fromBitmap(bmp)
-            if (text.isBlank()) "no readable text on screen" else "screen text:\n" + text.take(1600)
+            val items = OcrEngine.itemsFromBitmap(bmp).take(45)
+            if (items.isEmpty()) "no readable text on screen"
+            else buildString {
+                append("screen text (tap any with its @x,y):\n")
+                items.forEach { append("\"${it.text.take(60)}\" @${it.x},${it.y}\n") }
+            }.trim()
         } catch (e: Exception) { "ocr failed: ${e.message}" }
     }
 

@@ -4,21 +4,27 @@ import com.aqil.ai.agent.AgentAction
 import com.aqil.ai.agent.AgentController
 import com.aqil.ai.agent.AgentEvent
 import com.aqil.ai.data.ModelProfile
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /**
  * Drives a task to completion by looping:
  *   read screen -> ask model for next action (JSON) -> perform it -> repeat.
- *
- * The model is text-only friendly: we serialize the screen's accessibility tree
- * instead of sending images, so cheap/free models can still operate the phone.
  */
 class AgentEngine(private val openAi: OpenAiClient) {
 
     companion object {
-        private const val MAX_STEPS = 18
-        private const val KEEP_OBSERVATIONS = 3
+        private const val MAX_STEPS = 24
+        private const val KEEP_OBSERVATIONS = 4
+        private const val MAX_BAD_REPLIES = 3
+        private const val STUCK_LIMIT = 4
+
+        // Button presses that can spend money or cause hard-to-undo effects.
+        private val RISKY = listOf(
+            "pay", "buy", "purchase", "order", "checkout", "place order", "confirm order",
+            "delete", "remove", "transfer", "dial", "call ", "subscribe", "book ", "send money"
+        )
 
         val SYSTEM_PROMPT = """
             You are Aqil AI, an autonomous Android phone operator working for your owner.
@@ -28,38 +34,44 @@ class AgentEngine(private val openAi: OpenAiClient) {
               [n] <type> "<label>" id:<resourceId> {state}
             type is one of: input, button, toggle, link, text.
             state may include: editable, scrollable, focused, checked.
+            Icon-only controls show as button "(ImageView)" — use the id hint or [index].
             Example:  [4] input "Search" id:search_src_text {editable}
 
-            Reply with a SINGLE JSON object and nothing else (no markdown, no prose outside it):
-              {"thought":"<=10 words","action":"<name>","params":{...}}
+            OUTPUT RULES — READ CAREFULLY:
+            - Reply with ONE JSON object and ABSOLUTELY NOTHING else. No prose, no markdown,
+              no code fences, no safety notes, no explanation before or after.
+            - Shape: {"thought":"<=10 words","action":"<name>","params":{...}}
 
             Actions:
-              open_app     {"query":"whatsapp"}          open an app by name
-              tap          {"text":"Search"}             tap element by matching label/id
+              open_app     {"query":"spotify"}           open an app by name
+              tap          {"text":"Search"}             tap by matching label/id (case-insensitive)
               tap          {"index":4}                   tap element by its [number]
-              type         {"text":"hello","enter":true} type into the focused/nearest input; enter submits
-              press_enter  {}                            submit the current field (search/go)
+              tap          {"x":540,"y":1200}            tap raw coordinates (use with read_screen)
+              type         {"text":"lovely","enter":true} type into the focused/nearest input
+              press_enter  {}                            submit the current field
               long_press   {"index":6}                   long-press an element
-              scroll       {"direction":"down"}          down|up|left|right (to reveal more)
+              scroll       {"direction":"down"}          down|up|left|right
               back {} · home {} · recents {} · notifications {}
-              screenshot   {}                            capture a screenshot
-              read_screen  {}                            OCR the display to read text inside images/photos
+              read_screen  {}                            OCR the display; returns text with @x,y to tap
+              screenshot   {}                            capture a screenshot to gallery
               wait         {"ms":800}                     let the screen settle
-              speak        {"text":"..."}                say something aloud to the owner
-              ask          {"text":"which chat?"}        ask a question, then stop
-              finish       {"summary":"done: ..."}       the task is complete
+              speak        {"text":"..."}                say something aloud
+              ask          {"text":"which one?"}         ask a question, then stop
+              finish       {"summary":"done: ..."}       the goal is complete
 
             Strategy:
-            - Work in small, verifiable steps. Trust the SCREEN list; never invent elements.
-            - Prefer tap by [index] or exact "text". Use raw x/y only as a last resort.
-            - To type: make sure an input is focused (tap it first if needed), then "type".
-            - For search: type with "enter":true, or type then press_enter.
-            - If the target isn't listed, "scroll" to reveal it (tap-by-text auto-scrolls too).
-            - If the SCREEN list is sparse, or the text you need lives inside an image/photo, use read_screen.
-            - If the TASK is a question you can answer from the REFERENCE DOCUMENT (when provided) or
-              from general knowledge without touching the phone, answer it immediately with finish.
-            - After each action the SCREEN updates — check that it did what you expected; if not, adapt.
-            - Finish as soon as the goal is met. If truly blocked, "ask" and stop.
+            - Work step by step and trust the SCREEN list. Never invent elements.
+            - Search is almost always a "Search" tab in the BOTTOM navigation bar or a magnifier
+              icon in the TOP toolbar. Tap it by "text":"Search" or its [index].
+            - Prefer tap by [index] or exact "text". Use raw x/y only with read_screen results.
+            - To type: ensure an input is focused (tap it first if needed), then "type".
+              For search boxes use "enter":true (or type then press_enter).
+            - If a control isn't in the SCREEN list (e.g. an unlabeled icon), use read_screen,
+              then tap the returned "label" @x,y with {"x":..,"y":..}.
+            - If the target isn't visible, "scroll" to reveal it (tap-by-text auto-scrolls too).
+            - After each action the SCREEN updates — verify it worked; if not, adapt. Do NOT repeat
+              the same failing action. Do NOT give up early.
+            - Finish only when the goal is actually done. If truly blocked, "ask".
         """.trimIndent()
     }
 
@@ -67,6 +79,8 @@ class AgentEngine(private val openAi: OpenAiClient) {
         profile: ModelProfile,
         task: String,
         contextText: String? = null,
+        customInstructions: String? = null,
+        confirmRisky: Boolean = false,
         onEvent: (AgentEvent) -> Unit,
     ) {
         val device = AgentController.device
@@ -75,6 +89,8 @@ class AgentEngine(private val openAi: OpenAiClient) {
             try {
                 val msgs = ArrayList<Turn>()
                 msgs += Turn("system", "You are Aqil AI, a helpful, concise assistant.")
+                if (!customInstructions.isNullOrBlank())
+                    msgs += Turn("system", "Owner's standing instructions:\n$customInstructions")
                 if (!contextText.isNullOrBlank())
                     msgs += Turn("system", "Reference document the owner shared:\n$contextText")
                 msgs += Turn("user", task)
@@ -86,17 +102,22 @@ class AgentEngine(private val openAi: OpenAiClient) {
             return
         }
 
+        var lastScreen = device.dumpScreen()
         val history = ArrayList<Turn>()
         history += Turn("system", SYSTEM_PROMPT)
         history += Turn("user", buildString {
+            if (!customInstructions.isNullOrBlank())
+                append("OWNER'S STANDING INSTRUCTIONS (obey these):\n$customInstructions\n\n")
             if (!contextText.isNullOrBlank())
                 append("REFERENCE DOCUMENT (from an image the owner shared):\n$contextText\n\n")
-            append("TASK: $task\n\nSCREEN:\n${device.dumpScreen()}")
+            append("TASK: $task\n\nSCREEN:\n$lastScreen")
         })
 
         device.showHud()
         try {
             var step = 0
+            var badReplies = 0
+            var unchanged = 0
             while (step < MAX_STEPS) {
                 step++
                 if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
@@ -109,7 +130,30 @@ class AgentEngine(private val openAi: OpenAiClient) {
                 history += Turn("assistant", reply)
 
                 val action = parseAction(reply)
-                if (action == null) { onEvent(AgentEvent.Speak(reply.trim())); return }
+                if (action == null) {
+                    badReplies++
+                    if (badReplies >= MAX_BAD_REPLIES) {
+                        val clean = reply.trim()
+                        val looksLikeAnswer = clean.length in 1..300 &&
+                            !clean.contains("safety", ignoreCase = true) && !clean.contains("{")
+                        onEvent(
+                            if (looksLikeAnswer) AgentEvent.Speak(clean)
+                            else AgentEvent.Error(
+                                "The model kept replying without a usable action. Try a more capable " +
+                                    "model in Settings (an OpenAI or Groq model handles this better)."
+                            )
+                        )
+                        return
+                    }
+                    history += Turn(
+                        "user",
+                        "That was not a valid action. Reply with ONLY one JSON object, e.g. " +
+                            "{\"action\":\"tap\",\"params\":{\"text\":\"Search\"}} — no other text.\n\n" +
+                            "SCREEN:\n${device.dumpScreen()}"
+                    )
+                    continue
+                }
+                badReplies = 0
 
                 action.thought?.takeIf { it.isNotBlank() }?.let { onEvent(AgentEvent.Thinking(it)) }
                 if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
@@ -125,11 +169,38 @@ class AgentEngine(private val openAi: OpenAiClient) {
                         onEvent(AgentEvent.Finish("Waiting for your answer.")); return
                     }
                     else -> {
+                        // Confirmation gate for risky, hard-to-undo actions.
+                        if (confirmRisky && isRisky(action)) {
+                            val approved = requestConfirm(riskPrompt(action), onEvent)
+                            if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
+                            if (!approved) {
+                                onEvent(AgentEvent.Step(action, "skipped — you declined"))
+                                history += Turn(
+                                    "user",
+                                    "The owner DECLINED that action. Do not repeat it; choose a " +
+                                        "different approach or finish.\n\nSCREEN:\n${device.dumpScreen()}"
+                                )
+                                continue
+                            }
+                        }
+
                         val result = try { device.execute(action) } catch (e: Exception) { "error: ${e.message}" }
                         onEvent(AgentEvent.Step(action, result))
                         if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
-                        delay(250)
-                        history += Turn("user", "RESULT: $result\n\nSCREEN:\n${device.dumpScreen()}")
+                        delay(settleFor(action.name))
+
+                        val screen = device.dumpScreen()
+                        val changesExpected = action.name in setOf("tap", "click", "scroll", "swipe", "type", "long_press")
+                        unchanged = if (changesExpected && screen == lastScreen) unchanged + 1 else 0
+                        lastScreen = screen
+                        if (unchanged >= STUCK_LIMIT) {
+                            onEvent(AgentEvent.Finish("I'm stuck — the screen isn't responding to that. Can you nudge me in the right direction?"))
+                            return
+                        }
+                        val note = if (unchanged >= 2)
+                            "\n(NOTE: the screen did NOT change after that — try a different element, scroll, or read_screen.)"
+                        else ""
+                        history += Turn("user", "RESULT: $result$note\n\nSCREEN:\n$screen")
                     }
                 }
             }
@@ -139,7 +210,34 @@ class AgentEngine(private val openAi: OpenAiClient) {
         }
     }
 
-    /** Keep the system + task turns and only the last few observation pairs to bound context. */
+    private suspend fun requestConfirm(prompt: String, onEvent: (AgentEvent) -> Unit): Boolean {
+        val d = CompletableDeferred<Boolean>()
+        AgentController.confirm = d
+        onEvent(AgentEvent.Confirm(prompt))
+        return try { d.await() } finally { AgentController.confirm = null }
+    }
+
+    private fun isRisky(a: AgentAction): Boolean {
+        if (a.name !in setOf("tap", "click", "long_press")) return false
+        val hay = (a.params.optString("text") + " " + (a.thought ?: "")).lowercase()
+        return RISKY.any { hay.contains(it) }
+    }
+
+    private fun riskPrompt(a: AgentAction): String {
+        val label = a.params.optString("text").ifBlank { a.thought ?: a.name }
+        return "Aqil wants to tap \"$label\". Approve?"
+    }
+
+    /** How long to wait for the screen to settle after each kind of action. */
+    private fun settleFor(action: String): Long = when (action) {
+        "open_app", "launch_app" -> 1500
+        "tap", "click", "back", "recents", "notifications" -> 550
+        "scroll", "swipe" -> 450
+        "type", "press_enter", "enter", "submit" -> 350
+        "read_screen", "ocr", "screen_text" -> 250
+        else -> 300
+    }
+
     private fun trimmed(history: List<Turn>): List<Turn> {
         if (history.size <= 2 + KEEP_OBSERVATIONS * 2) return history
         return history.take(2) + history.takeLast(KEEP_OBSERVATIONS * 2)

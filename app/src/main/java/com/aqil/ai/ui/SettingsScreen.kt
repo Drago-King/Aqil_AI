@@ -133,6 +133,14 @@ fun SettingsScreen(vm: MainViewModel, actions: SetupActions) {
         SectionHeader("Voice (ElevenLabs)")
         VoiceCard(voice = settings.voice, onSave = { vm.saveVoice(it) }, onTest = { vm.testVoice() })
 
+        SectionHeader("Behaviour")
+        BehaviourCard(
+            instructions = settings.customInstructions,
+            confirmRisky = settings.confirmRisky,
+            onSaveInstructions = { vm.saveCustomInstructions(it) },
+            onToggleConfirm = { vm.setConfirmRisky(it) },
+        )
+
         Spacer(Modifier.size(2.dp))
         Text(
             "Aqil AI · v1.0 · crafted for you",
@@ -256,6 +264,65 @@ private fun VoiceCard(voice: VoiceConfig, onSave: (VoiceConfig) -> Unit, onTest:
                     }
                 )
                 GhostButton("Test", modifier = Modifier.weight(1f), accent = true, onClick = onTest)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BehaviourCard(
+    instructions: String,
+    confirmRisky: Boolean,
+    onSaveInstructions: (String) -> Unit,
+    onToggleConfirm: (Boolean) -> Unit,
+) {
+    var text by remember(instructions) { mutableStateOf(instructions) }
+    AqilCard {
+        Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text("Custom instructions", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Standing hints Aqil follows on every task — your name, app quirks, preferences.",
+                color = TextMuted, fontSize = 12.sp, lineHeight = 16.sp
+            )
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = {
+                    Text(
+                        "e.g. My name is Ravi. Always confirm before buying. Prefer WhatsApp over SMS.",
+                        color = TextMuted, fontSize = 12.sp
+                    )
+                },
+                minLines = 3,
+                maxLines = 6,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Gold,
+                    unfocusedBorderColor = BorderSubtle,
+                    focusedContainerColor = Navy750,
+                    unfocusedContainerColor = Navy750,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    cursorColor = Gold,
+                )
+            )
+            PrimaryButton("Save instructions", onClick = { onSaveInstructions(text.trim()) })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Confirm risky actions", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Ask me before pay / buy / order / delete / call.", color = TextMuted, fontSize = 12.sp)
+                }
+                Switch(
+                    checked = confirmRisky,
+                    onCheckedChange = onToggleConfirm,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Navy900,
+                        checkedTrackColor = Gold,
+                        uncheckedTrackColor = Navy750,
+                        uncheckedBorderColor = BorderSubtle,
+                    )
+                )
             }
         }
     }
