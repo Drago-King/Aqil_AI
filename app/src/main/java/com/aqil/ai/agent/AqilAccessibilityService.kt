@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
@@ -12,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -20,6 +22,10 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
 import com.aqil.ai.R
+import com.aqil.ai.ocr.OcrEngine
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.Executor
+import kotlin.coroutines.resume
 import kotlin.math.abs
 
 /**
@@ -64,6 +70,7 @@ class AqilAccessibilityService : AccessibilityService(), DeviceController {
             "press_enter", "enter", "submit" -> pressEnter()
             "long_press" -> longPress(action)
             "scroll", "swipe" -> scroll(action.params.optString("direction", "down"))
+            "read_screen", "ocr", "screen_text" -> readScreenText()
             "back" -> global(GLOBAL_ACTION_BACK, "pressed back")
             "home" -> global(GLOBAL_ACTION_HOME, "went home")
             "recents" -> global(GLOBAL_ACTION_RECENTS, "opened recents")
@@ -284,9 +291,9 @@ class AqilAccessibilityService : AccessibilityService(), DeviceController {
             else -> arrayOf(cx, h * 0.75f, cx, h * 0.35f)
         }
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 260)
+        val stroke = GestureDescription.StrokeDescription(path, 0, 210)
         main.post { dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null) }
-        Thread.sleep(120)
+        Thread.sleep(70)
         return "scrolled $direction"
     }
 
@@ -299,6 +306,35 @@ class AqilAccessibilityService : AccessibilityService(), DeviceController {
             performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT); "screenshot saved to gallery"
         } else "screenshots need Android 11+"
     }
+
+    /** OCR the current display so the model can read text that lives inside images. */
+    private suspend fun readScreenText(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "screen OCR needs Android 11+"
+        val bmp = captureBitmap() ?: return "couldn't capture the screen"
+        return try {
+            val text = OcrEngine.fromBitmap(bmp)
+            if (text.isBlank()) "no readable text on screen" else "screen text:\n" + text.take(1600)
+        } catch (e: Exception) { "ocr failed: ${e.message}" }
+    }
+
+    private suspend fun captureBitmap(): Bitmap? =
+        suspendCancellableCoroutine { cont ->
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                Executor { command -> main.post(command) },
+                object : AccessibilityService.TakeScreenshotCallback {
+                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                        val buffer = result.hardwareBuffer
+                        val bmp = try {
+                            Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, false)
+                        } catch (_: Exception) { null } finally { buffer.close() }
+                        if (cont.isActive) cont.resume(bmp)
+                    }
+                    override fun onFailure(errorCode: Int) { if (cont.isActive) cont.resume(null) }
+                }
+            )
+        }
 
     private fun launchApp(query: String): String {
         if (query.isBlank()) return "no app named"
@@ -329,10 +365,10 @@ class AqilAccessibilityService : AccessibilityService(), DeviceController {
     /** Dispatch a short tap gesture at the given point. Posted to the main thread. */
     private fun runGesture(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y); lineTo(x, y) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 55)
+        val stroke = GestureDescription.StrokeDescription(path, 0, 45)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
         main.post { dispatchGesture(gesture, null, null) }
-        Thread.sleep(110)
+        Thread.sleep(90)
         return true
     }
 }

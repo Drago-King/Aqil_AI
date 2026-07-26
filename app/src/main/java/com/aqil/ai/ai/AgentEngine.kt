@@ -43,6 +43,7 @@ class AgentEngine(private val openAi: OpenAiClient) {
               scroll       {"direction":"down"}          down|up|left|right (to reveal more)
               back {} · home {} · recents {} · notifications {}
               screenshot   {}                            capture a screenshot
+              read_screen  {}                            OCR the display to read text inside images/photos
               wait         {"ms":800}                     let the screen settle
               speak        {"text":"..."}                say something aloud to the owner
               ask          {"text":"which chat?"}        ask a question, then stop
@@ -54,6 +55,9 @@ class AgentEngine(private val openAi: OpenAiClient) {
             - To type: make sure an input is focused (tap it first if needed), then "type".
             - For search: type with "enter":true, or type then press_enter.
             - If the target isn't listed, "scroll" to reveal it (tap-by-text auto-scrolls too).
+            - If the SCREEN list is sparse, or the text you need lives inside an image/photo, use read_screen.
+            - If the TASK is a question you can answer from the REFERENCE DOCUMENT (when provided) or
+              from general knowledge without touching the phone, answer it immediately with finish.
             - After each action the SCREEN updates — check that it did what you expected; if not, adapt.
             - Finish as soon as the goal is met. If truly blocked, "ask" and stop.
         """.trimIndent()
@@ -62,19 +66,19 @@ class AgentEngine(private val openAi: OpenAiClient) {
     suspend fun run(
         profile: ModelProfile,
         task: String,
+        contextText: String? = null,
         onEvent: (AgentEvent) -> Unit,
     ) {
         val device = AgentController.device
 
         if (device == null) {
             try {
-                val reply = openAi.chat(
-                    profile,
-                    listOf(
-                        Turn("system", "You are Aqil AI, a helpful, concise assistant."),
-                        Turn("user", task),
-                    ),
-                )
+                val msgs = ArrayList<Turn>()
+                msgs += Turn("system", "You are Aqil AI, a helpful, concise assistant.")
+                if (!contextText.isNullOrBlank())
+                    msgs += Turn("system", "Reference document the owner shared:\n$contextText")
+                msgs += Turn("user", task)
+                val reply = openAi.chat(profile, msgs)
                 onEvent(AgentEvent.Speak(reply.ifBlank { "I don't have screen control enabled yet." }))
             } catch (e: Exception) {
                 onEvent(AgentEvent.Error(e.message ?: "Request failed"))
@@ -84,7 +88,11 @@ class AgentEngine(private val openAi: OpenAiClient) {
 
         val history = ArrayList<Turn>()
         history += Turn("system", SYSTEM_PROMPT)
-        history += Turn("user", "TASK: $task\n\nSCREEN:\n${device.dumpScreen()}")
+        history += Turn("user", buildString {
+            if (!contextText.isNullOrBlank())
+                append("REFERENCE DOCUMENT (from an image the owner shared):\n$contextText\n\n")
+            append("TASK: $task\n\nSCREEN:\n${device.dumpScreen()}")
+        })
 
         device.showHud()
         try {
@@ -120,7 +128,7 @@ class AgentEngine(private val openAi: OpenAiClient) {
                         val result = try { device.execute(action) } catch (e: Exception) { "error: ${e.message}" }
                         onEvent(AgentEvent.Step(action, result))
                         if (AgentController.cancelRequested) { onEvent(AgentEvent.Finish("Stopped.")); return }
-                        delay(350)
+                        delay(250)
                         history += Turn("user", "RESULT: $result\n\nSCREEN:\n${device.dumpScreen()}")
                     }
                 }

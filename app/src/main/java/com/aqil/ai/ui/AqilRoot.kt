@@ -59,6 +59,7 @@ class SetupActions(
     val isAccessibilityOn: () -> Boolean,
     val isOverlayOn: () -> Boolean,
     val isBubbleOn: () -> Boolean,
+    val onPickImage: () -> Unit,
 )
 
 @Composable

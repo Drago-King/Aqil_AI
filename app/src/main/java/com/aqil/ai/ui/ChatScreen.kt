@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -116,6 +117,7 @@ fun ChatScreen(vm: MainViewModel, actions: SetupActions) {
             onValue = { input = it },
             listening = listening,
             busy = busy,
+            onImage = actions.onPickImage,
             onMic = actions.onMic,
             onCancel = { vm.cancel() },
             onSend = { if (input.isNotBlank()) { vm.send(input); input = "" } }
@@ -256,6 +258,7 @@ private fun InputBar(
     onValue: (String) -> Unit,
     listening: Boolean,
     busy: Boolean,
+    onImage: () -> Unit,
     onMic: () -> Unit,
     onCancel: () -> Unit,
     onSend: () -> Unit,
@@ -268,11 +271,12 @@ private fun InputBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        ImageButton(onClick = onImage)
         OutlinedTextField(
             value = value,
             onValueChange = onValue,
             modifier = Modifier.weight(1f),
-            placeholder = { Text("Ask Aqil to do something…", color = TextMuted) },
+            placeholder = { Text("Ask Aqil…", color = TextMuted) },
             shape = RoundedCornerShape(16.dp),
             maxLines = 4,
             colors = OutlinedTextFieldDefaults.colors(
@@ -288,6 +292,19 @@ private fun InputBar(
         MicButton(listening = listening, onClick = onMic)
         if (busy) StopButton(onClick = onCancel) else SendButton(onClick = onSend)
     }
+}
+
+@Composable
+private fun ImageButton(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(Navy800)
+            .border(1.dp, BorderSubtle, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Icon(Icons.Filled.Image, contentDescription = "Read a photo", tint = Gold) }
 }
 
 @Composable

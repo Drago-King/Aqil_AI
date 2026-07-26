@@ -1,6 +1,7 @@
 package com.aqil.ai
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aqil.ai.agent.AgentController
@@ -12,6 +13,7 @@ import com.aqil.ai.data.ChatMessage
 import com.aqil.ai.data.ModelProfile
 import com.aqil.ai.data.SettingsRepository
 import com.aqil.ai.data.VoiceConfig
+import com.aqil.ai.ocr.OcrEngine
 import com.aqil.ai.voice.VoicePlayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val openAi = OpenAiClient()
     private val engine = AgentEngine(openAi)
     private val voice = VoicePlayer(app)
+    private val ctx = app.applicationContext
+
+    /** Text OCR'd from the last image the user shared; used as context for follow-up questions. */
+    private var documentContext: String = ""
 
     val settings: StateFlow<AqilSettings> =
         repo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AqilSettings())
@@ -62,8 +68,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         AgentController.reset()
 
         viewModelScope.launch(Dispatchers.IO) {
-            engine.run(profile, text) { event -> handleEvent(event) }
+            engine.run(profile, text, documentContext.ifBlank { null }) { event -> handleEvent(event) }
             _busy.value = false
+        }
+    }
+
+    /** OCR an image the user picked from their gallery (e.g. a printed certificate). */
+    fun readImage(uri: Uri) {
+        if (_busy.value) return
+        add(ChatMessage.Role.SYSTEM, "Reading the image…")
+        _busy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val text = OcrEngine.fromUri(ctx, uri)
+                if (text.isBlank()) {
+                    add(ChatMessage.Role.ASSISTANT, "I couldn't find readable text in that image.")
+                } else {
+                    documentContext = text.take(4000)
+                    add(ChatMessage.Role.ASSISTANT, "Here's what I read:\n\n" + text.take(1500))
+                    add(ChatMessage.Role.SYSTEM, "Ask me about it — e.g. \"what's the name on it?\" — or tell me to use it in a task.")
+                }
+            } catch (e: Exception) {
+                add(ChatMessage.Role.SYSTEM, "⚠ Couldn't read that image: ${e.message}")
+            } finally {
+                _busy.value = false
+            }
         }
     }
 
