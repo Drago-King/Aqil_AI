@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Adaptive icons draw the meaningful content within the central ~66dp safe zone. -->
+    <path
+        android:fillColor="#F2C94C"
+        android:pathData="M54,30 C41.3,30 31,40.3 31,53 C31,65.7 41.3,76 54,76 C66.7,76 77,65.7 77,53 C77,40.3 66.7,30 54,30 Z M54,38 C62.3,38 69,44.7 69,53 C69,61.3 62.3,68 54,68 C45.7,68 39,61.3 39,53 C39,44.7 45.7,38 54,38 Z" />
+    <path
+        android:fillColor="#F2C94C"
+        android:pathData="M54,46 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:strokeColor="#EAF0F7"
+        android:strokeWidth="3"
+        android:pathData="M54,58 L54,71" />

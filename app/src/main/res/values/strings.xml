@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aqil AI</string>
+    <string name="accessibility_label">Aqil AI Agent</string>
+    <string name="accessibility_desc">Allows Aqil AI to read your screen and perform taps, swipes and typing so it can carry out tasks you ask for by voice or text.</string>
+</resources>

@@ -1,0 +1,56 @@
+name: Build Aqil AI APK
+
+# Builds the app and attaches the installable APK to a GitHub Release.
+# Runs automatically on every push to main, and can be run manually from the Actions tab.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/AqilAI.apk
+
+      - name: Upload APK as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AqilAI-apk
+          path: out/AqilAI.apk
+
+      - name: Publish GitHub Release with the APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Aqil AI v1.0.${{ github.run_number }}
+          body: |
+            Automated build of Aqil AI.
+            Download **AqilAI.apk** below and install it on your phone.
+            (You may need to allow installing from unknown sources.)
+          files: out/AqilAI.apk
