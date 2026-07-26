@@ -7,9 +7,13 @@ import android.view.accessibility.AccessibilityNodeInfo
 data class ScreenElement(
     val index: Int,
     val text: String,
-    val kind: String,
-    val clickable: Boolean,
+    val type: String,          // input | button | toggle | link | text
+    val id: String,            // short resource id (may be blank)
+    val clickable: Boolean,    // itself or via a clickable ancestor
     val editable: Boolean,
+    val scrollable: Boolean,
+    val focused: Boolean,
+    val checked: Boolean,
     val centerX: Int,
     val centerY: Int,
     val node: AccessibilityNodeInfo,
@@ -17,40 +21,47 @@ data class ScreenElement(
 
 object ScreenReader {
 
-    private const val MAX_ELEMENTS = 60
+    private const val MAX_ELEMENTS = 55
 
-    /** Walk the active window and collect meaningful elements. */
+    /** Walk the active window and collect meaningful elements, in reading order. */
     fun collect(root: AccessibilityNodeInfo?): List<ScreenElement> {
         if (root == null) return emptyList()
-        val out = ArrayList<ScreenElement>()
+        val raw = ArrayList<ScreenElement>()
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
-        var index = 0
 
-        while (stack.isNotEmpty() && out.size < MAX_ELEMENTS) {
+        while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             val label = labelOf(node)
-            val useful = label.isNotBlank() || node.isClickable || node.isEditable
+            val effClickable = node.isClickable || hasClickableAncestor(node)
+            val useful = label.isNotBlank() || effClickable || node.isEditable || node.isScrollable
             if (useful) {
                 val r = Rect().also { node.getBoundsInScreen(it) }
-                if (r.width() > 0 && r.height() > 0) {
-                    out += ScreenElement(
-                        index = index++,
-                        text = label.ifBlank { "(${shortClass(node)})" }.take(80),
-                        kind = shortClass(node),
-                        clickable = node.isClickable,
+                if (r.width() > 0 && r.height() > 0 && r.bottom > 0 && r.right > 0) {
+                    raw += ScreenElement(
+                        index = 0, // assigned after sorting
+                        text = label.ifBlank { "(${shortClass(node)})" }.take(90),
+                        type = typeOf(node, effClickable),
+                        id = shortId(node),
+                        clickable = effClickable,
                         editable = node.isEditable,
+                        scrollable = node.isScrollable,
+                        focused = node.isFocused,
+                        checked = node.isCheckable && node.isChecked,
                         centerX = r.centerX(),
                         centerY = r.centerY(),
                         node = node,
                     )
                 }
             }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { stack.addLast(it) }
-            }
+            for (i in 0 until node.childCount) node.getChild(i)?.let { stack.addLast(it) }
         }
-        return out
+
+        // Reading order: top-to-bottom, then left-to-right. Cheap and predictable for the model.
+        val ordered = raw.sortedWith(compareBy({ it.centerY }, { it.centerX }))
+            .take(MAX_ELEMENTS)
+        // Re-number after sorting so indices are stable within this dump.
+        return ordered.mapIndexed { i, e -> e.copy(index = i) }
     }
 
     /** Render the elements as a compact numbered list the model can reason over. */
@@ -58,22 +69,51 @@ object ScreenReader {
         if (elements.isEmpty()) return "(screen is empty or not readable)"
         return buildString {
             elements.forEach { e ->
-                val tags = buildList {
-                    if (e.clickable) add("tap")
-                    if (e.editable) add("input")
+                append("[${e.index}] ${e.type} \"${e.text}\"")
+                if (e.id.isNotBlank()) append(" id:${e.id}")
+                val state = buildList {
+                    if (e.editable) add("editable")
+                    if (e.scrollable) add("scrollable")
+                    if (e.focused) add("focused")
+                    if (e.checked) add("checked")
                 }.joinToString(",")
-                append("[${e.index}] \"${e.text}\"")
-                if (tags.isNotBlank()) append(" <$tags>")
-                append(" @${e.centerX},${e.centerY}\n")
+                if (state.isNotBlank()) append(" {$state}")
+                append("\n")
             }
         }.trim()
     }
 
     private fun labelOf(n: AccessibilityNodeInfo): String {
-        val t = n.text?.toString()?.trim().orEmpty()
-        if (t.isNotEmpty()) return t
-        val d = n.contentDescription?.toString()?.trim().orEmpty()
-        return d
+        n.text?.toString()?.trim()?.let { if (it.isNotEmpty()) return it }
+        n.contentDescription?.toString()?.trim()?.let { if (it.isNotEmpty()) return it }
+        // Hint text for empty inputs helps a lot (e.g. "Search").
+        if (n.isEditable) n.hintText?.toString()?.trim()?.let { if (it.isNotEmpty()) return it }
+        return ""
+    }
+
+    private fun typeOf(n: AccessibilityNodeInfo, clickable: Boolean): String {
+        val cls = (n.className?.toString() ?: "").lowercase()
+        return when {
+            n.isEditable || cls.contains("edittext") -> "input"
+            cls.contains("switch") || cls.contains("checkbox") || cls.contains("toggle") -> "toggle"
+            cls.contains("button") || cls.contains("imagebutton") -> "button"
+            clickable -> "button"
+            else -> "text"
+        }
+    }
+
+    private fun shortId(n: AccessibilityNodeInfo): String =
+        n.viewIdResourceName?.substringAfterLast('/')?.take(40).orEmpty()
+
+    private fun hasClickableAncestor(n: AccessibilityNodeInfo): Boolean {
+        var p = n.parent
+        var hops = 0
+        while (p != null && hops < 5) {
+            if (p.isClickable) return true
+            p = p.parent
+            hops++
+        }
+        return false
     }
 
     private fun shortClass(n: AccessibilityNodeInfo): String {

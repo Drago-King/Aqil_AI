@@ -59,11 +59,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         add(ChatMessage.Role.USER, text)
         _busy.value = true
+        AgentController.reset()
 
         viewModelScope.launch(Dispatchers.IO) {
             engine.run(profile, text) { event -> handleEvent(event) }
             _busy.value = false
         }
+    }
+
+    /** Cancel the running task (from the in-app Stop or the floating stop button). */
+    fun cancel() {
+        AgentController.requestCancel()
+        stopVoice()
     }
 
     private fun handleEvent(event: AgentEvent) {

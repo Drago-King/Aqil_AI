@@ -115,7 +115,9 @@ fun ChatScreen(vm: MainViewModel, actions: SetupActions) {
             value = input,
             onValue = { input = it },
             listening = listening,
+            busy = busy,
             onMic = actions.onMic,
+            onCancel = { vm.cancel() },
             onSend = { if (input.isNotBlank()) { vm.send(input); input = "" } }
         )
     }
@@ -253,7 +255,9 @@ private fun InputBar(
     value: String,
     onValue: (String) -> Unit,
     listening: Boolean,
+    busy: Boolean,
     onMic: () -> Unit,
+    onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
     Row(
@@ -282,8 +286,20 @@ private fun InputBar(
             )
         )
         MicButton(listening = listening, onClick = onMic)
-        SendButton(onClick = onSend)
+        if (busy) StopButton(onClick = onCancel) else SendButton(onClick = onSend)
     }
+}
+
+@Composable
+private fun StopButton(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Danger)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = Color.White) }
 }
 
 @Composable

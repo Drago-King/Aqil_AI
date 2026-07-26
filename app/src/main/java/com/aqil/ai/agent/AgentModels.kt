@@ -25,6 +25,10 @@ interface DeviceController {
 
     /** Perform one action and return a short human-readable result. */
     suspend fun execute(action: AgentAction): String
+
+    /** Show/hide the floating "stop" control while a task runs. Default no-op. */
+    fun showHud() {}
+    fun hideHud() {}
 }
 
 /**
@@ -35,5 +39,12 @@ object AgentController {
     @Volatile
     var device: DeviceController? = null
 
+    /** Set by the floating stop button (or the in-app Stop). The loop checks it each step. */
+    @Volatile
+    var cancelRequested: Boolean = false
+
     val isConnected: Boolean get() = device != null
+
+    fun requestCancel() { cancelRequested = true }
+    fun reset() { cancelRequested = false }
 }
